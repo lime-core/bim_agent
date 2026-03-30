@@ -1,0 +1,25 @@
+{
+  "name": "bim-agent",
+  "version": "0.1.0",
+  "description": "BIM Assembly Client Agent for EIR System",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx tsx watch src/index.ts",
+    "start": "npx tsx src/index.ts",
+    "build": "npx tsup src/index.ts --format esm --dts",
+    "typecheck": "npx tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
