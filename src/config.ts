@@ -29,7 +29,7 @@ export function loadConfig(): AgentConfig {
     workDir: process.env.WORK_DIR || './work',
     autodeskBasePath: process.env.AUTODESK_BASE_PATH || 'C:\\Program Files\\Autodesk',
     navisworksLang: process.env.NAVISWORKS_LANG || 'ru-RU',
-    processTimeoutMs: parseInt(process.env.PROCESS_TIMEOUT_MS || '1800000', 10),
+    processTimeoutMs: parseInt(process.env.PROCESS_TIMEOUT_MS || '3600000', 10),
   };
 }
 

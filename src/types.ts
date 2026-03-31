@@ -23,11 +23,18 @@ export type AgentStatus = 'online' | 'offline' | 'busy';
 // --- API Response Types ---
 
 export interface ModelDataSource {
+  name: string | null;
   type: 'revit_server' | 'folder';
   folderPath: string | null;
   serverAddress: string | null;
   serverPath: string | null;
   revitVersion: string | null;
+}
+
+export interface AssemblySettings {
+  outputPath: string | null;
+  archiveRvtVersions: number;
+  archiveNwdVersions: number;
 }
 
 export interface BuildStep {
@@ -48,16 +55,18 @@ export interface BuildStep {
     sectionId: string | null;
     dataSource: ModelDataSource | null;
   } | null;
-  section?: { id: string; name: string } | null;
+  section?: { id: string; name: string; code: string } | null;
 }
 
 export interface Build {
   id: string;
   projectId: string;
+  configName: string | null;
   status: BuildStatus;
   totalSteps: number;
   completedSteps: number;
   failedSteps: number;
+  assemblySettings: AssemblySettings | null;
   steps: BuildStep[];
 }
 

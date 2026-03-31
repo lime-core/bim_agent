@@ -19,9 +19,14 @@ export async function executeBuild(
 
   try {
     // Initialize build context (working directories)
-    const context = new BuildContext(config.workDir, build.id);
+    const context = new BuildContext(
+      config.workDir,
+      build.id,
+      build.configName,
+      build.assemblySettings
+    );
     await context.initialize();
-    logger.info(`Work dir: ${context.baseDir}`);
+    logger.info(`Work dir: ${context.rootDir}`);
 
     // Report downloading status
     await client.reportProgress(build.id, { buildStatus: 'downloading' });
