@@ -4,6 +4,7 @@ import { logger } from './logger.js';
 export interface SpawnOptions {
   cwd?: string;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export interface SpawnResult {
@@ -46,10 +47,12 @@ export function spawnProcess(
       }
     });
 
+    // Timeout kill
     let timer: ReturnType<typeof setTimeout> | null = null;
     if (options?.timeoutMs) {
       timer = setTimeout(() => {
         killed = true;
+        logger.warn(`Process timed out after ${options.timeoutMs}ms, killing...`);
         child.kill('SIGTERM');
         setTimeout(() => {
           if (!child.killed) child.kill('SIGKILL');
@@ -57,9 +60,30 @@ export function spawnProcess(
       }, options.timeoutMs);
     }
 
+    // AbortSignal kill (cancellation from server)
+    if (options?.signal) {
+      const onAbort = () => {
+        if (!killed) {
+          killed = true;
+          logger.info('Process cancelled via AbortSignal, killing...');
+          child.kill('SIGTERM');
+          setTimeout(() => {
+            if (!child.killed) child.kill('SIGKILL');
+          }, 5000);
+        }
+      };
+      if (options.signal.aborted) {
+        onAbort();
+      } else {
+        options.signal.addEventListener('abort', onAbort, { once: true });
+      }
+    }
+
     child.on('close', (code) => {
       if (timer) clearTimeout(timer);
-      if (killed) {
+      if (killed && options?.signal?.aborted) {
+        reject(new Error('Process cancelled'));
+      } else if (killed) {
         reject(new Error(`Process timed out after ${options?.timeoutMs}ms`));
       } else {
         resolve({ exitCode: code ?? 1, stdout, stderr });

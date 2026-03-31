@@ -4,11 +4,27 @@ import { logger } from './logger.js';
 import type { ScanFileEntry } from './types.js';
 
 /**
+ * Test folder accessibility. Returns descriptive message or throws.
+ */
+export async function testFolderAccess(folderPath: string): Promise<string> {
+  await access(folderPath);
+  const folderStat = await stat(folderPath);
+
+  if (!folderStat.isDirectory()) {
+    throw new Error(`Путь не является папкой: ${folderPath}`);
+  }
+
+  const entries = await readdir(folderPath);
+  const rvtCount = entries.filter((e) => extname(e).toLowerCase() === '.rvt').length;
+
+  return `OK: папка доступна, ${entries.length} элементов, ${rvtCount} .rvt файлов на верхнем уровне`;
+}
+
+/**
  * Recursively scans a folder for .rvt files.
  * Returns relative paths within the folder.
  */
 export async function scanFolder(folderPath: string): Promise<ScanFileEntry[]> {
-  // Validate path exists and is a directory
   await access(folderPath);
   const folderStat = await stat(folderPath);
 

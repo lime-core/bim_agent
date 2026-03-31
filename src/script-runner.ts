@@ -1,10 +1,10 @@
-import { copyFile, writeFile, access, unlink, mkdir } from 'node:fs/promises';
+import { copyFile, writeFile, access, unlink, mkdir, stat } from 'node:fs/promises';
 import { join, basename, resolve } from 'node:path';
-import type { BuildStep, StepResult } from './types.js';
+import type { Build, BuildStep, StepResult } from './types.js';
 import type { BuildContext } from './build-context.js';
 import { sanitizePath } from './build-context.js';
 import type { AgentConfig } from './config.js';
-import { getNavisworksPath } from './config.js';
+import { getNavisworksPath, getRevitToolPath } from './config.js';
 import { logger } from './logger.js';
 import { spawnProcess } from './spawn-process.js';
 import { archiveFile } from './archiver.js';
@@ -16,6 +16,20 @@ const KNOWN_ERRORS: Record<string, string> = {
   '-2147024891': 'Отказано в доступе. Проверьте права на папку.',
   '-2147024894': 'Файл не найден. Проверьте путь к модели.',
 };
+
+/**
+ * Verify that a cached NWD path is usable.
+ * Returns 'valid', 'missing' (file not found), or 'corrupted' (partial write < 1 KB).
+ */
+async function verifyNwdPath(path: string): Promise<'valid' | 'missing' | 'corrupted'> {
+  try {
+    const stats = await stat(path);
+    if (stats.size < 1024) return 'corrupted';
+    return 'valid';
+  } catch {
+    return 'missing';
+  }
+}
 
 function enrichErrorMessage(raw: string): string {
   for (const [code, message] of Object.entries(KNOWN_ERRORS)) {
@@ -30,23 +44,30 @@ export async function runStep(
   step: BuildStep,
   context: BuildContext,
   config: AgentConfig,
-  allSteps: BuildStep[]
+  allSteps: BuildStep[],
+  build: Build,
+  signal?: AbortSignal
 ): Promise<StepResult> {
   switch (step.stepType) {
     case 'download':
-      return handleDownload(step, context);
+      return handleDownload(step, context, config, signal);
     case 'convert_rvt_nwd':
-      return handleConvert(step, context, config);
+      return handleConvert(step, context, config, signal);
     case 'assemble_section':
-      return handleAssembleSection(step, context, config, allSteps);
+      return handleAssembleSection(step, context, config, allSteps, signal);
     case 'assemble_final':
-      return handleAssembleFinal(step, context, config, allSteps);
+      return handleAssembleFinal(step, context, config, allSteps, build, signal);
     default:
       return { success: false, output: '', errorMessage: `Unknown step type: ${step.stepType}` };
   }
 }
 
-async function handleDownload(step: BuildStep, context: BuildContext): Promise<StepResult> {
+async function handleDownload(
+  step: BuildStep,
+  context: BuildContext,
+  config: AgentConfig,
+  signal?: AbortSignal
+): Promise<StepResult> {
   if (!step.model) {
     return { success: false, output: '', errorMessage: 'Download step has no model' };
   }
@@ -98,11 +119,89 @@ async function handleDownload(step: BuildStep, context: BuildContext): Promise<S
   }
 
   if (dataSource.type === 'revit_server') {
-    return {
-      success: false,
-      output: '',
-      errorMessage: 'Revit Server download not yet implemented',
-    };
+    if (!dataSource.serverAddress) {
+      return { success: false, output: '', errorMessage: 'Data source has no server address' };
+    }
+
+    const revitVersion = dataSource.revitVersion;
+    if (!revitVersion) {
+      return { success: false, output: '', errorMessage: 'Data source has no Revit version' };
+    }
+
+    const revitTool = getRevitToolPath(config, revitVersion);
+
+    // Destination in persistent cache: Кэш/{sourceName}/model.rvt
+    const sourceName = dataSource.name || 'default';
+    const cacheDir = context.getSourceCacheDir(sourceName);
+    await mkdir(cacheDir, { recursive: true });
+    const destPath = join(cacheDir, model.fileName);
+
+    // RevitServerTool expects: serverPath\fileName (backslash separated)
+    const serverPath = (dataSource.serverPath || '')
+      .replace(/\//g, '\\')
+      .replace(/^\\+/, '')
+      .replace(/\\+$/, '');
+    const modelPath = model.filePath.replace(/\//g, '\\');
+    const fullServerPath = serverPath ? `${serverPath}\\${modelPath}` : modelPath;
+
+    // Extract server host (strip protocol if present)
+    const serverHost = dataSource.serverAddress.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+
+    logger.info(
+      `RevitServerTool: createLocalRVT "${fullServerPath}" -server ${serverHost} -destination "${destPath}"`
+    );
+
+    // Archive existing file before overwriting
+    await archiveFile(destPath, context.archiveRvtDir, context.settings.archiveRvtVersions);
+
+    try {
+      const result = await spawnProcess(
+        revitTool,
+        [
+          'createLocalRVT',
+          fullServerPath,
+          '-server',
+          serverHost,
+          '-destination',
+          destPath,
+          '-overwrite',
+        ],
+        { timeoutMs: config.processTimeoutMs, signal }
+      );
+
+      if (result.exitCode !== 0) {
+        const errorDetail = enrichErrorMessage(`${result.stdout} ${result.stderr}`.trim());
+        return {
+          success: false,
+          output: result.stdout,
+          errorMessage: `RevitServerTool exited with code ${result.exitCode}: ${errorDetail}`,
+        };
+      }
+
+      // Verify file was created
+      try {
+        await access(destPath);
+      } catch {
+        return {
+          success: false,
+          output: result.stdout,
+          errorMessage: `RevitServerTool completed but file not found: ${destPath}`,
+        };
+      }
+
+      context.setDownloadedPath(model.id, destPath);
+      return {
+        success: true,
+        output: `Downloaded ${model.fileName} from Revit Server`,
+        outputPath: destPath,
+      };
+    } catch (err) {
+      return {
+        success: false,
+        output: '',
+        errorMessage: `RevitServerTool error: ${err instanceof Error ? err.message : err}`,
+      };
+    }
   }
 
   return {
@@ -115,7 +214,8 @@ async function handleDownload(step: BuildStep, context: BuildContext): Promise<S
 async function handleConvert(
   step: BuildStep,
   context: BuildContext,
-  config: AgentConfig
+  config: AgentConfig,
+  signal?: AbortSignal
 ): Promise<StepResult> {
   if (!step.model) {
     return { success: false, output: '', errorMessage: 'Convert step has no model' };
@@ -164,7 +264,7 @@ async function handleConvert(
     const result = await spawnProcess(
       navisworksExe,
       ['/i', inputTxtPath, '/of', nwdPath, '/over', '/lang', config.navisworksLang],
-      { timeoutMs: config.processTimeoutMs }
+      { timeoutMs: config.processTimeoutMs, signal }
     );
 
     logger.info(`FileToolsTaskRunner exited with code ${result.exitCode}`);
@@ -204,13 +304,14 @@ async function handleAssembleSection(
   step: BuildStep,
   context: BuildContext,
   config: AgentConfig,
-  allSteps: BuildStep[]
+  allSteps: BuildStep[],
+  signal?: AbortSignal
 ): Promise<StepResult> {
   if (!step.sectionId || !step.section) {
     return { success: false, output: '', errorMessage: 'Assemble section step has no section' };
   }
 
-  // Find all converted NWDs for this section
+  // Свежесконвертированные NWD этого раздела (из текущего билда)
   const sectionNwds: string[] = [];
   for (const s of allSteps) {
     if (s.stepType === 'convert_rvt_nwd' && s.model?.sectionId === step.sectionId) {
@@ -219,8 +320,28 @@ async function handleAssembleSection(
     }
   }
 
+  // Кэшированные NWD для моделей, которые не конвертировались в этом билде
+  // (модели «current» или переехавшие из другого раздела с готовым NWD)
+  const invalidatedPaths: string[] = [];
+  if (step.cachedModelNwdPaths && step.cachedModelNwdPaths.length > 0) {
+    for (const cachedPath of step.cachedModelNwdPaths) {
+      const validity = await verifyNwdPath(cachedPath);
+      if (validity === 'valid') {
+        sectionNwds.push(cachedPath);
+        logger.info(`Using cached NWD for section "${step.section.name}": ${cachedPath}`);
+      } else {
+        logger.warn(`Cached NWD ${validity} (invalidating): ${cachedPath}`);
+        invalidatedPaths.push(cachedPath);
+      }
+    }
+  }
+
   if (sectionNwds.length === 0) {
-    return { success: true, output: `No models in section ${step.section.name}, skipping` };
+    return {
+      success: true,
+      output: `No models in section ${step.section.name}, skipping`,
+      invalidatedPaths,
+    };
   }
 
   const revitVersion = resolveRevitVersion(allSteps, step.sectionId);
@@ -251,7 +372,7 @@ async function handleAssembleSection(
     const result = await spawnProcess(
       navisworksExe,
       ['/i', inputTxtPath, '/of', sectionNwdPath, '/over', '/lang', config.navisworksLang],
-      { timeoutMs: config.processTimeoutMs }
+      { timeoutMs: config.processTimeoutMs, signal }
     );
 
     await unlink(inputTxtPath).catch(() => {});
@@ -270,6 +391,7 @@ async function handleAssembleSection(
       success: true,
       output: `Assembled section "${sectionLabel}"`,
       outputPath: sectionNwdPath,
+      invalidatedPaths,
     };
   } catch (err) {
     await unlink(inputTxtPath).catch(() => {});
@@ -281,16 +403,58 @@ async function handleAssembleFinal(
   step: BuildStep,
   context: BuildContext,
   config: AgentConfig,
-  allSteps: BuildStep[]
+  allSteps: BuildStep[],
+  build: Build,
+  signal?: AbortSignal
 ): Promise<StepResult> {
-  // Collect all section NWDs
-  const finalNwds: string[] = [...context.getAllSectionPaths()];
+  // Начинаем с разделов, собранных в текущем билде
+  const finalNwdSet = new Set<string>(context.getAllSectionPaths());
+  const invalidatedPaths: string[] = [];
 
-  // Add unassigned model NWDs (models with no section)
+  // Добавляем неизменённые разделы из файловой системы.
+  // Агент знает ВСЕ разделы конфига через build.allSections.
+  // Путь к NWD каждого раздела детерминирован: Сконвертированные/{label}/{label}.nwd
+  if (build.allSections && build.allSections.length > 0) {
+    for (const section of build.allSections) {
+      const sectionLabel = `${section.code} — ${section.name}`;
+      const expectedPath = join(
+        context.convertedDir,
+        sanitizePath(sectionLabel),
+        `${sanitizePath(sectionLabel)}.nwd`
+      );
+      if (!finalNwdSet.has(expectedPath)) {
+        const validity = await verifyNwdPath(expectedPath);
+        if (validity === 'valid') {
+          finalNwdSet.add(expectedPath);
+          logger.info(`Including unchanged section from filesystem: ${sectionLabel}`);
+        } else {
+          logger.warn(`Section NWD ${validity} on filesystem (skipping): ${sectionLabel}`);
+        }
+      }
+    }
+  }
+
+  const finalNwds = [...finalNwdSet];
+
+  // Модели без раздела — свежесконвертированные из текущего билда
   for (const s of allSteps) {
     if (s.stepType === 'convert_rvt_nwd' && !s.model?.sectionId) {
       const nwdPath = context.getConvertedPath(s.model!.id);
       if (nwdPath) finalNwds.push(nwdPath);
+    }
+  }
+
+  // Модели без раздела — кэш (не конвертировались в этом билде)
+  if (build.cachedUnassignedNwdPaths && build.cachedUnassignedNwdPaths.length > 0) {
+    for (const cachedPath of build.cachedUnassignedNwdPaths) {
+      const validity = await verifyNwdPath(cachedPath);
+      if (validity === 'valid') {
+        finalNwds.push(cachedPath);
+        logger.info(`Including cached unassigned model: ${cachedPath}`);
+      } else {
+        logger.warn(`Cached unassigned NWD ${validity} (invalidating): ${cachedPath}`);
+        invalidatedPaths.push(cachedPath);
+      }
     }
   }
 
@@ -326,7 +490,7 @@ async function handleAssembleFinal(
     const result = await spawnProcess(
       navisworksExe,
       ['/i', inputTxtPath, '/of', finalNwdPath, '/over', '/lang', config.navisworksLang],
-      { timeoutMs: config.processTimeoutMs }
+      { timeoutMs: config.processTimeoutMs, signal }
     );
 
     await unlink(inputTxtPath).catch(() => {});
@@ -340,7 +504,12 @@ async function handleAssembleFinal(
       };
     }
 
-    return { success: true, output: 'Assembled final federated model', outputPath: finalNwdPath };
+    return {
+      success: true,
+      output: 'Assembled final federated model',
+      outputPath: finalNwdPath,
+      invalidatedPaths,
+    };
   } catch (err) {
     await unlink(inputTxtPath).catch(() => {});
     throw err;

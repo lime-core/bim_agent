@@ -1,5 +1,6 @@
 import { logger } from './logger.js';
-import { scanFolder } from './folder-scanner.js';
+import { scanFolder, testFolderAccess } from './folder-scanner.js';
+import { scanRevitServer, testRevitServerConnection } from './revit-server-scanner.js';
 import type { ApiClient } from './api-client.js';
 import type { AgentCommand, CommandResult } from './types.js';
 
@@ -22,6 +23,9 @@ export async function executeCommand(client: ApiClient, command: AgentCommand): 
     switch (command.commandType) {
       case 'scan_data_source':
         result = await executeScanDataSource(command);
+        break;
+      case 'test_connection':
+        result = await executeTestConnection(command);
         break;
       default:
         result = {
@@ -58,11 +62,41 @@ async function executeScanDataSource(command: AgentCommand): Promise<CommandResu
   }
 
   if (dataSource.type === 'revit_server') {
-    // Phase 2: Revit Server REST API scanning
-    return {
-      status: 'failed',
-      errorMessage: 'Revit Server scanning is not yet implemented',
-    };
+    if (!dataSource.serverAddress) {
+      return { status: 'failed', errorMessage: 'Data source has no server address' };
+    }
+
+    logger.info(
+      `Scanning Revit Server: ${dataSource.serverAddress}/${dataSource.serverPath || ''}`
+    );
+    const files = await scanRevitServer(dataSource);
+    return { status: 'completed', result: { files } };
+  }
+
+  return { status: 'failed', errorMessage: `Unknown data source type: ${dataSource.type}` };
+}
+
+async function executeTestConnection(command: AgentCommand): Promise<CommandResult> {
+  const { dataSource } = command;
+
+  if (dataSource.type === 'folder') {
+    if (!dataSource.folderPath) {
+      return { status: 'failed', errorMessage: 'Путь к папке не указан' };
+    }
+
+    logger.info(`Testing folder access: ${dataSource.folderPath}`);
+    const message = await testFolderAccess(dataSource.folderPath);
+    return { status: 'completed', result: { message } };
+  }
+
+  if (dataSource.type === 'revit_server') {
+    if (!dataSource.serverAddress) {
+      return { status: 'failed', errorMessage: 'Адрес сервера не указан' };
+    }
+
+    logger.info(`Testing Revit Server connection: ${dataSource.serverAddress}`);
+    const message = await testRevitServerConnection(dataSource);
+    return { status: 'completed', result: { message } };
   }
 
   return { status: 'failed', errorMessage: `Unknown data source type: ${dataSource.type}` };
