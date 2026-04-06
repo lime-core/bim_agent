@@ -25,11 +25,9 @@ if %errorlevel% == 0 (
     echo Установка через winget...
     winget install --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements
     if !errorlevel! == 0 (
-        echo.
         echo [OK] Node.js установлен.
-        echo [!] Закройте это окно и запустите install.bat снова, чтобы применились пути.
-        pause
-        exit /b 0
+        set "PATH=%PATH%;C:\Program Files\nodejs"
+        goto :install_deps
     )
     echo [!] winget не смог установить Node.js. Попробуем вручную...
     echo.
@@ -57,11 +55,9 @@ echo Запускаем установщик...
 msiexec /i "%INSTALLER%" /qn ADDLOCAL=ALL
 if !errorlevel! == 0 (
     del "%INSTALLER%" 2>nul
-    echo.
     echo [OK] Node.js установлен.
-    echo [!] Закройте это окно и запустите install.bat снова, чтобы применились пути.
-    pause
-    exit /b 0
+    set "PATH=%PATH%;C:\Program Files\nodejs"
+    goto :install_deps
 ) else (
     echo [ОШИБКА] Установка Node.js завершилась с ошибкой.
     echo Установите вручную: https://nodejs.org/
