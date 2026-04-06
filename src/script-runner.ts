@@ -166,7 +166,7 @@ async function handleDownload(
           destPath,
           '-overwrite',
         ],
-        { timeoutMs: config.processTimeoutMs, signal }
+        { timeoutMs: config.processTimeoutMs, signal, encoding: config.processEncoding }
       );
 
       if (result.exitCode !== 0) {
@@ -264,7 +264,7 @@ async function handleConvert(
     const result = await spawnProcess(
       navisworksExe,
       ['/i', inputTxtPath, '/of', nwdPath, '/over', '/lang', config.navisworksLang],
-      { timeoutMs: config.processTimeoutMs, signal }
+      { timeoutMs: config.processTimeoutMs, signal, encoding: config.processEncoding }
     );
 
     logger.info(`FileToolsTaskRunner exited with code ${result.exitCode}`);
@@ -372,7 +372,7 @@ async function handleAssembleSection(
     const result = await spawnProcess(
       navisworksExe,
       ['/i', inputTxtPath, '/of', sectionNwdPath, '/over', '/lang', config.navisworksLang],
-      { timeoutMs: config.processTimeoutMs, signal }
+      { timeoutMs: config.processTimeoutMs, signal, encoding: config.processEncoding }
     );
 
     await unlink(inputTxtPath).catch(() => {});
@@ -490,7 +490,7 @@ async function handleAssembleFinal(
     const result = await spawnProcess(
       navisworksExe,
       ['/i', inputTxtPath, '/of', finalNwdPath, '/over', '/lang', config.navisworksLang],
-      { timeoutMs: config.processTimeoutMs, signal }
+      { timeoutMs: config.processTimeoutMs, signal, encoding: config.processEncoding }
     );
 
     await unlink(inputTxtPath).catch(() => {});

@@ -9,6 +9,8 @@ export interface AgentConfig {
   autodeskBasePath: string;
   navisworksLang: string;
   processTimeoutMs: number;
+  /** Encoding for stdout/stderr of Autodesk tools. E.g. 'cp1251', 'cp866'. Default: 'utf-8' */
+  processEncoding: string;
 }
 
 function requireEnv(name: string): string {
@@ -30,6 +32,7 @@ export function loadConfig(): AgentConfig {
     autodeskBasePath: process.env.AUTODESK_BASE_PATH || 'C:\\Program Files\\Autodesk',
     navisworksLang: process.env.NAVISWORKS_LANG || 'ru-RU',
     processTimeoutMs: parseInt(process.env.PROCESS_TIMEOUT_MS || '3600000', 10),
+    processEncoding: process.env.PROCESS_ENCODING || 'utf-8',
   };
 }
 
