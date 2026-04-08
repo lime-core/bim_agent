@@ -142,11 +142,26 @@ export interface PendingCommandsResponse {
   commands: AgentCommand[];
 }
 
+export interface VersionHistoryEntry {
+  versionNumber: number;
+  modelSize: number;
+  supportSize: number;
+  date: string;
+  user: string;
+  comment: string;
+}
+
 export interface ScanFileEntry {
   fileName: string;
   filePath: string;
   fileSize?: number;
   lastModifiedAt?: string;
+  // RS-specific fields
+  versionNumber?: number;
+  publishedBy?: string;
+  comment?: string;
+  supportSize?: number;
+  versionHistory?: VersionHistoryEntry[];
 }
 
 export interface CommandResult {

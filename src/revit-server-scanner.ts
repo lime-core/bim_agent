@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { logger } from './logger.js';
-import type { ScanFileEntry, DataSourceInfo } from './types.js';
+import type { ScanFileEntry, DataSourceInfo, VersionHistoryEntry } from './types.js';
 
 /**
  * Revit Server REST API scanner.
@@ -123,6 +123,67 @@ async function fetchContents(
   return response.json();
 }
 
+interface HistoryResponse {
+  Path: string;
+  Items: HistoryItem[];
+}
+
+interface HistoryItem {
+  VersionNumber: number;
+  ModelSize: number;
+  SupportSize: number;
+  Date: string;
+  User: string;
+  Comment: string;
+  OverwrittenByHistoryNumber: number;
+}
+
+/** Parse RS date format "/Date(milliseconds)/" to ISO string */
+function parseRsDate(dateStr: string): string {
+  const match = dateStr.match(/\/Date\((\d+)\)\//);
+  if (!match) return dateStr;
+  return new Date(parseInt(match[1], 10)).toISOString();
+}
+
+async function fetchHistory(
+  baseUrl: string,
+  headers: Record<string, string>,
+  modelPath: string
+): Promise<VersionHistoryEntry[]> {
+  const normalizedPath = normalizePath(modelPath);
+  const pipePath = '|' + normalizedPath.split('/').map(encodeURIComponent).join('|');
+  const url = `${baseUrl}/${pipePath}/history`;
+
+  logger.debug(`Revit Server API: GET ${url}`);
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      ...headers,
+      Accept: 'application/json',
+    },
+    signal: AbortSignal.timeout(30_000),
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(
+      `Revit Server history API error ${response.status}: ${text || response.statusText}`
+    );
+  }
+
+  const data: HistoryResponse = await response.json();
+
+  return (data.Items || []).map((item) => ({
+    versionNumber: item.VersionNumber,
+    modelSize: item.ModelSize,
+    supportSize: item.SupportSize,
+    date: parseRsDate(item.Date),
+    user: item.User,
+    comment: item.Comment || '',
+  }));
+}
+
 /**
  * Test connection to Revit Server by fetching the root path contents.
  * Throws on failure.
@@ -200,12 +261,42 @@ async function scanFolderRecursive(
     // Relative path from root
     const fullPath =
       currentPath === rootPath ? fileName : `${currentPath.slice(rootPath.length + 1)}/${fileName}`;
+    // Full path on RS for /history call
+    const rsModelPath = `${currentPath}/${fileName}`;
+
+    // Fetch version history for this model
+    let versionHistory: VersionHistoryEntry[] = [];
+    try {
+      versionHistory = await fetchHistory(baseUrl, headers, rsModelPath);
+      logger.debug(`Model ${fileName}: ${versionHistory.length} version(s)`);
+    } catch (err) {
+      logger.warn(
+        `Failed to fetch history for ${fileName}: ${err instanceof Error ? err.message : err}`
+      );
+    }
+
+    const latestVersion =
+      versionHistory.length > 0
+        ? versionHistory.reduce(
+            (max, v) => (v.versionNumber > max.versionNumber ? v : max),
+            versionHistory[0]
+          )
+        : null;
 
     results.push({
       fileName,
       filePath: normalizePath(fullPath),
       fileSize: model.ModelSize || model.Size || undefined,
-      lastModifiedAt: model.Date || undefined,
+      lastModifiedAt: latestVersion
+        ? latestVersion.date
+        : model.Date
+          ? parseRsDate(model.Date)
+          : undefined,
+      versionNumber: latestVersion?.versionNumber,
+      publishedBy: latestVersion?.user,
+      comment: latestVersion?.comment,
+      supportSize: model.SupportSize || undefined,
+      versionHistory: versionHistory.length > 0 ? versionHistory : undefined,
     });
   }
 
