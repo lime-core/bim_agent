@@ -100,9 +100,11 @@ async function fetchContents(
 ): Promise<FolderContents> {
   const normalizedPath = normalizePath(folderPath);
   // Revit Server REST API uses "|" as path separator: "|folder|subfolder"
-  // Leading "|" is required (represents root)
-  const pipePath = '|' + normalizedPath.split('/').map(encodeURIComponent).join('|');
-  const url = `${baseUrl}/${pipePath}/contents`;
+  // For root (empty path), no pipe prefix needed — just "/contents"
+  const pipePath = normalizedPath
+    ? '|' + normalizedPath.split('/').map(encodeURIComponent).join('|')
+    : '';
+  const url = `${baseUrl}${pipePath ? `/${pipePath}` : ''}/contents`;
 
   logger.debug(`Revit Server API: GET ${url}`);
 
@@ -151,8 +153,10 @@ async function fetchHistory(
   modelPath: string
 ): Promise<VersionHistoryEntry[]> {
   const normalizedPath = normalizePath(modelPath);
-  const pipePath = '|' + normalizedPath.split('/').map(encodeURIComponent).join('|');
-  const url = `${baseUrl}/${pipePath}/history`;
+  const pipePath = normalizedPath
+    ? '|' + normalizedPath.split('/').map(encodeURIComponent).join('|')
+    : '';
+  const url = `${baseUrl}${pipePath ? `/${pipePath}` : ''}/history`;
 
   logger.debug(`Revit Server API: GET ${url}`);
 
@@ -201,7 +205,7 @@ export async function testRevitServerConnection(dataSource: DataSourceInfo): Pro
 
   const baseUrl = buildBaseUrl(config);
   const headers = buildHeaders(config);
-  const path = config.basePath || '/';
+  const path = config.basePath || '';
 
   const contents = await fetchContents(baseUrl, headers, path);
 
@@ -227,7 +231,7 @@ export async function scanRevitServer(dataSource: DataSourceInfo): Promise<ScanF
 
   const baseUrl = buildBaseUrl(config);
   const headers = buildHeaders(config);
-  const rootPath = normalizePath(config.basePath || '/');
+  const rootPath = normalizePath(config.basePath || '');
 
   const files: ScanFileEntry[] = [];
   await scanFolderRecursive(baseUrl, headers, rootPath, rootPath, files);
