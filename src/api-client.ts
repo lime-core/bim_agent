@@ -102,4 +102,11 @@ export class ApiClient {
   async reportCommandResult(commandId: string, data: CommandResult): Promise<{ ok: boolean }> {
     return this.request('POST', `/api/agent/commands/${commandId}/result`, data);
   }
+
+  async reportVersionHistory(
+    commandId: string,
+    data: { filePath: string; versionHistory: unknown[] }[]
+  ): Promise<{ ok: boolean }> {
+    return this.request('POST', `/api/agent/commands/${commandId}/versions`, data);
+  }
 }

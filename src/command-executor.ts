@@ -2,7 +2,9 @@ import { logger } from './logger.js';
 import { scanFolder, testFolderAccess } from './folder-scanner.js';
 import { scanRevitServer, testRevitServerConnection } from './revit-server-scanner.js';
 import type { ApiClient } from './api-client.js';
-import type { AgentCommand, CommandResult } from './types.js';
+import type { AgentCommand, CommandResult, ScanFileEntry, VersionHistoryEntry } from './types.js';
+
+const VERSIONS_CHUNK_SIZE = 10; // models per chunk
 
 export async function executeCommand(client: ApiClient, command: AgentCommand): Promise<void> {
   logger.info(`Executing command ${command.commandType} (${command.id})`);
@@ -39,12 +41,43 @@ export async function executeCommand(client: ApiClient, command: AgentCommand): 
     result = { status: 'failed', errorMessage: message };
   }
 
-  // Report result
+  // Separate version history from result to keep payload small
+  let versionHistories: { filePath: string; versionHistory: VersionHistoryEntry[] }[] = [];
+
+  if (result.status === 'completed' && result.result?.files) {
+    const files = result.result.files as ScanFileEntry[];
+    versionHistories = files
+      .filter((f) => f.versionHistory && f.versionHistory.length > 0)
+      .map((f) => ({ filePath: f.filePath, versionHistory: f.versionHistory! }));
+
+    // Strip versionHistory from main payload
+    result.result.files = files.map(({ versionHistory, ...rest }) => rest);
+  }
+
+  // Report main result (lightweight)
   try {
     await client.reportCommandResult(command.id, result);
     logger.info(`Command ${command.id} ${result.status}`);
   } catch (err) {
     logger.error(`Failed to report command result: ${err instanceof Error ? err.message : err}`);
+    return;
+  }
+
+  // Send version histories in chunks
+  if (versionHistories.length > 0) {
+    for (let i = 0; i < versionHistories.length; i += VERSIONS_CHUNK_SIZE) {
+      const chunk = versionHistories.slice(i, i + VERSIONS_CHUNK_SIZE);
+      try {
+        await client.reportVersionHistory(command.id, chunk);
+        logger.info(
+          `Sent version history chunk ${Math.floor(i / VERSIONS_CHUNK_SIZE) + 1}/${Math.ceil(versionHistories.length / VERSIONS_CHUNK_SIZE)} (${chunk.length} models)`
+        );
+      } catch (err) {
+        logger.error(
+          `Failed to send version history chunk: ${err instanceof Error ? err.message : err}`
+        );
+      }
+    }
   }
 }
 
