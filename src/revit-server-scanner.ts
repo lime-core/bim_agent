@@ -100,11 +100,11 @@ async function fetchContents(
 ): Promise<FolderContents> {
   const normalizedPath = normalizePath(folderPath);
   // Revit Server REST API uses "|" as path separator: "|folder|subfolder"
-  // For root (empty path), no pipe prefix needed — just "/contents"
+  // Root path also requires leading "|": "/%7C/contents"
   const pipePath = normalizedPath
     ? '|' + normalizedPath.split('/').map(encodeURIComponent).join('|')
-    : '';
-  const url = `${baseUrl}${pipePath ? `/${pipePath}` : ''}/contents`;
+    : '|';
+  const url = `${baseUrl}/${pipePath}/contents`;
 
   logger.debug(`Revit Server API: GET ${url}`);
 
@@ -155,8 +155,8 @@ async function fetchHistory(
   const normalizedPath = normalizePath(modelPath);
   const pipePath = normalizedPath
     ? '|' + normalizedPath.split('/').map(encodeURIComponent).join('|')
-    : '';
-  const url = `${baseUrl}${pipePath ? `/${pipePath}` : ''}/history`;
+    : '|';
+  const url = `${baseUrl}/${pipePath}/history`;
 
   logger.debug(`Revit Server API: GET ${url}`);
 
