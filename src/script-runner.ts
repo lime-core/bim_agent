@@ -517,8 +517,14 @@ async function handleAssembleFinal(
 }
 
 function resolveRevitVersion(allSteps: BuildStep[], sectionId?: string | null): string | null {
+  // First try convert steps, then any step with a model — covers builds with no conversions
   for (const s of allSteps) {
     if (s.stepType !== 'convert_rvt_nwd' || !s.model?.dataSource?.revitVersion) continue;
+    if (sectionId && s.model.sectionId !== sectionId) continue;
+    return s.model.dataSource.revitVersion;
+  }
+  for (const s of allSteps) {
+    if (!s.model?.dataSource?.revitVersion) continue;
     if (sectionId && s.model.sectionId !== sectionId) continue;
     return s.model.dataSource.revitVersion;
   }
