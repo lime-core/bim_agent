@@ -1,0 +1,63 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build Windows executable
+        run: bun build --compile --target=bun-windows-x64 src/index.ts --outfile bim-agent.exe
+
+      - name: Delete existing latest release
+        run: gh release delete latest --yes --cleanup-tag || true
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest
+          make_latest: true
+          files: bim-agent.exe
+          body: |
+            ## Скачать
+
+            👉 **[bim-agent.exe](https://github.com/${{ github.repository }}/releases/latest/download/bim-agent.exe)**
+
+            ## Установка (exe)
+
+            1. Скачайте `bim-agent.exe`
+            2. Создайте файл `.env` рядом с ним (образец: [.env.example](.env.example))
+            3. Заполните `SERVER_URL` и `API_KEY`
+            4. Запустите `bim-agent.exe`
+
+            > ⚠️ **Windows SmartScreen:** при первом запуске нажмите «Подробнее» → «Выполнить в любом случае»
+
+            ## Альтернативный запуск (Node.js)
+
+            ```bash
+            git clone https://github.com/${{ github.repository }}.git
+            cd bim_agent
+            npm install
+            cp .env.example .env
+            # Заполните .env
+            npm start
+            ```
