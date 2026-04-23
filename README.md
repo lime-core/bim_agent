@@ -115,7 +115,7 @@ Node.js устанавливать не нужно.
 
 **1. Скачайте `bim-agent.exe`**
 
-Откройте раздел [Releases](../../releases/latest) и скачайте `bim-agent.exe`.
+Откройте раздел [Releases](https://github.com/lime-core/bim_agent/releases/latest) и скачайте `bim-agent.exe`.
 
 > ⚠️ **Windows SmartScreen:** при первом запуске появится предупреждение «Windows защитила ваш компьютер». Нажмите **«Подробнее»** → **«Выполнить в любом случае»**. Это разовая операция.
 
@@ -242,7 +242,7 @@ npm start
 
 ### Обновление агента
 
-**Exe:** скачайте новую версию из раздела [Releases](../../releases/latest) и замените `bim-agent.exe`.
+**Exe:** скачайте новую версию из раздела [Releases](https://github.com/lime-core/bim_agent/releases/latest) и замените `bim-agent.exe`.
 
 **Node.js:** выполните `git pull` в папке агента, затем перезапустите.
 
