@@ -11,6 +11,14 @@ export interface AgentConfig {
   processTimeoutMs: number;
   /** Encoding for stdout/stderr of Autodesk tools. E.g. 'cp1251', 'cp866'. Default: 'utf-8' */
   processEncoding: string;
+  /**
+   * Optional Revit Server credentials stored on the agent host.
+   * Used when the EIR DataSource is marked with `useAgentCredentials=true` — then
+   * the server sends `useLocalCredentials: true` instead of a password, and the
+   * agent substitutes these values.
+   */
+  revitServerUsername?: string;
+  revitServerPassword?: string;
 }
 
 function requireEnv(name: string): string {
@@ -33,6 +41,8 @@ export function loadConfig(): AgentConfig {
     navisworksLang: process.env.NAVISWORKS_LANG || 'ru-RU',
     processTimeoutMs: parseInt(process.env.PROCESS_TIMEOUT_MS || '3600000', 10),
     processEncoding: process.env.PROCESS_ENCODING || 'utf-8',
+    revitServerUsername: process.env.REVIT_SERVER_USERNAME || undefined,
+    revitServerPassword: process.env.REVIT_SERVER_PASSWORD || undefined,
   };
 }
 

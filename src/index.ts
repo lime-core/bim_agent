@@ -49,7 +49,7 @@ async function main() {
 
   // 6. Start command poller
   startCommandPoller(client, config.pollIntervalMs, (command) => {
-    executeCommand(client, command);
+    executeCommand(client, command, config);
   });
 
   // 7. Graceful shutdown

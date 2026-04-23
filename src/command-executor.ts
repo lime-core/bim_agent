@@ -2,11 +2,16 @@ import { logger } from './logger.js';
 import { scanFolder, testFolderAccess } from './folder-scanner.js';
 import { scanRevitServer, testRevitServerConnection } from './revit-server-scanner.js';
 import type { ApiClient } from './api-client.js';
+import type { AgentConfig } from './config.js';
 import type { AgentCommand, CommandResult, ScanFileEntry, VersionHistoryEntry } from './types.js';
 
 const VERSIONS_CHUNK_SIZE = 10; // models per chunk
 
-export async function executeCommand(client: ApiClient, command: AgentCommand): Promise<void> {
+export async function executeCommand(
+  client: ApiClient,
+  command: AgentCommand,
+  agentConfig: AgentConfig
+): Promise<void> {
   logger.info(`Executing command ${command.commandType} (${command.id})`);
 
   // Acknowledge command
@@ -24,10 +29,10 @@ export async function executeCommand(client: ApiClient, command: AgentCommand): 
   try {
     switch (command.commandType) {
       case 'scan_data_source':
-        result = await executeScanDataSource(command);
+        result = await executeScanDataSource(command, agentConfig);
         break;
       case 'test_connection':
-        result = await executeTestConnection(command);
+        result = await executeTestConnection(command, agentConfig);
         break;
       default:
         result = {
@@ -81,7 +86,10 @@ export async function executeCommand(client: ApiClient, command: AgentCommand): 
   }
 }
 
-async function executeScanDataSource(command: AgentCommand): Promise<CommandResult> {
+async function executeScanDataSource(
+  command: AgentCommand,
+  agentConfig: AgentConfig
+): Promise<CommandResult> {
   const { dataSource } = command;
 
   if (dataSource.type === 'folder') {
@@ -100,16 +108,20 @@ async function executeScanDataSource(command: AgentCommand): Promise<CommandResu
     }
 
     logger.info(
-      `Scanning Revit Server: ${dataSource.serverAddress}/${dataSource.serverPath || ''}`
+      `Scanning Revit Server: ${dataSource.serverAddress}/${dataSource.serverPath || ''}` +
+        (dataSource.useLocalCredentials ? ' (using local agent credentials)' : '')
     );
-    const files = await scanRevitServer(dataSource);
+    const files = await scanRevitServer(dataSource, agentConfig);
     return { status: 'completed', result: { files } };
   }
 
   return { status: 'failed', errorMessage: `Unknown data source type: ${dataSource.type}` };
 }
 
-async function executeTestConnection(command: AgentCommand): Promise<CommandResult> {
+async function executeTestConnection(
+  command: AgentCommand,
+  agentConfig: AgentConfig
+): Promise<CommandResult> {
   const { dataSource } = command;
 
   if (dataSource.type === 'folder') {
@@ -127,8 +139,11 @@ async function executeTestConnection(command: AgentCommand): Promise<CommandResu
       return { status: 'failed', errorMessage: 'Адрес сервера не указан' };
     }
 
-    logger.info(`Testing Revit Server connection: ${dataSource.serverAddress}`);
-    const message = await testRevitServerConnection(dataSource);
+    logger.info(
+      `Testing Revit Server connection: ${dataSource.serverAddress}` +
+        (dataSource.useLocalCredentials ? ' (using local agent credentials)' : '')
+    );
+    const message = await testRevitServerConnection(dataSource, agentConfig);
     return { status: 'completed', result: { message } };
   }
 

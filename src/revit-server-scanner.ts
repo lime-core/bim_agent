@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { logger } from './logger.js';
 import type { ScanFileEntry, DataSourceInfo, VersionHistoryEntry } from './types.js';
+import type { AgentConfig } from './config.js';
 
 /**
  * Revit Server REST API scanner.
@@ -63,6 +64,42 @@ interface RevitServerConfig {
   revitVersion: string;
   username: string | null;
   password: string | null;
+}
+
+/**
+ * Error thrown when the DataSource requests local credentials but the agent's
+ * .env has no REVIT_SERVER_USERNAME / REVIT_SERVER_PASSWORD configured.
+ * Reported back to EIR as a failed command so the UI can show a clear message.
+ */
+export class MissingLocalCredentialsError extends Error {
+  constructor() {
+    super(
+      'Источник помечен как использующий учётные данные агента, но на ПК агента не заданы переменные REVIT_SERVER_USERNAME / REVIT_SERVER_PASSWORD в .env.'
+    );
+    this.name = 'MissingLocalCredentialsError';
+  }
+}
+
+/**
+ * Resolve Revit Server credentials — either from the DataSource payload or
+ * from the agent's local .env when the DataSource requested local creds.
+ */
+function resolveCredentials(
+  dataSource: DataSourceInfo,
+  config: AgentConfig
+): { username: string | null; password: string | null } {
+  if (dataSource.useLocalCredentials) {
+    const username = config.revitServerUsername ?? null;
+    const password = config.revitServerPassword ?? null;
+    if (!username || !password) {
+      throw new MissingLocalCredentialsError();
+    }
+    return { username, password };
+  }
+  return {
+    username: dataSource.serverUsername ?? null,
+    password: dataSource.serverPassword ?? null,
+  };
 }
 
 function buildBaseUrl(config: RevitServerConfig): string {
@@ -192,13 +229,17 @@ async function fetchHistory(
  * Test connection to Revit Server by fetching the root path contents.
  * Throws on failure.
  */
-export async function testRevitServerConnection(dataSource: DataSourceInfo): Promise<string> {
+export async function testRevitServerConnection(
+  dataSource: DataSourceInfo,
+  agentConfig: AgentConfig
+): Promise<string> {
+  const creds = resolveCredentials(dataSource, agentConfig);
   const config: RevitServerConfig = {
     host: dataSource.serverAddress || '',
     basePath: dataSource.serverPath || '',
     revitVersion: dataSource.revitVersion || '2024',
-    username: dataSource.serverUsername || null,
-    password: dataSource.serverPassword || null,
+    username: creds.username,
+    password: creds.password,
   };
 
   if (!config.host) throw new Error('Server address is required');
@@ -218,13 +259,17 @@ export async function testRevitServerConnection(dataSource: DataSourceInfo): Pro
 /**
  * Recursively scan Revit Server for .rvt models.
  */
-export async function scanRevitServer(dataSource: DataSourceInfo): Promise<ScanFileEntry[]> {
+export async function scanRevitServer(
+  dataSource: DataSourceInfo,
+  agentConfig: AgentConfig
+): Promise<ScanFileEntry[]> {
+  const creds = resolveCredentials(dataSource, agentConfig);
   const config: RevitServerConfig = {
     host: dataSource.serverAddress || '',
     basePath: dataSource.serverPath || '',
     revitVersion: dataSource.revitVersion || '2024',
-    username: dataSource.serverUsername || null,
-    password: dataSource.serverPassword || null,
+    username: creds.username,
+    password: creds.password,
   };
 
   if (!config.host) throw new Error('Server address is required');

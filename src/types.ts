@@ -128,6 +128,12 @@ export interface DataSourceInfo {
   serverPath: string | null;
   serverUsername: string | null;
   serverPassword: string | null;
+  /**
+   * When true, the agent must substitute its local REVIT_SERVER_USERNAME/PASSWORD
+   * from .env instead of relying on the (absent) serverUsername / serverPassword.
+   * When false/undefined, use the shipped credentials as-is.
+   */
+  useLocalCredentials?: boolean;
   folderPath: string | null;
   revitVersion: string | null;
 }
