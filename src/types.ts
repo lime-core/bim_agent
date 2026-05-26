@@ -65,13 +65,14 @@ export interface Build {
   id: string;
   projectId: string;
   configName: string | null;
+  revitVersion: string | null;
   status: BuildStatus;
   totalSteps: number;
   completedSteps: number;
   failedSteps: number;
   assemblySettings: AssemblySettings | null;
   // ВСЕ разделы конфига (включая неизменённые) — для финальной сборки
-  allSections: Array<{ id: string; code: string; name: string }>;
+  allSections: Array<{ id: string; code: string; name: string; cachedModelNwdPaths: string[] }>;
   // NWD-пути кэшированных безраздельных моделей — для финальной сборки
   cachedUnassignedNwdPaths: string[];
   steps: BuildStep[];

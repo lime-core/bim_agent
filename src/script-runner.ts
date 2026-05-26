@@ -54,7 +54,7 @@ export async function runStep(
     case 'convert_rvt_nwd':
       return handleConvert(step, context, config, signal);
     case 'assemble_section':
-      return handleAssembleSection(step, context, config, allSteps, signal);
+      return handleAssembleSection(step, context, config, allSteps, build, signal);
     case 'assemble_final':
       return handleAssembleFinal(step, context, config, allSteps, build, signal);
     default:
@@ -305,6 +305,7 @@ async function handleAssembleSection(
   context: BuildContext,
   config: AgentConfig,
   allSteps: BuildStep[],
+  build: Build,
   signal?: AbortSignal
 ): Promise<StepResult> {
   if (!step.sectionId || !step.section) {
@@ -344,7 +345,7 @@ async function handleAssembleSection(
     };
   }
 
-  const revitVersion = resolveRevitVersion(allSteps, step.sectionId);
+  const revitVersion = resolveRevitVersion(allSteps, step.sectionId, build.revitVersion);
   if (!revitVersion) {
     return {
       success: false,
@@ -429,6 +430,18 @@ async function handleAssembleFinal(
           logger.info(`Including unchanged section from filesystem: ${sectionLabel}`);
         } else {
           logger.warn(`Section NWD ${validity} on filesystem (skipping): ${sectionLabel}`);
+          for (const cachedPath of section.cachedModelNwdPaths ?? []) {
+            const cachedValidity = await verifyNwdPath(cachedPath);
+            if (cachedValidity === 'valid') {
+              finalNwdSet.add(cachedPath);
+              logger.info(`Including cached model from section "${sectionLabel}": ${cachedPath}`);
+            } else {
+              logger.warn(
+                `Cached section model NWD ${cachedValidity} (invalidating): ${cachedPath}`
+              );
+              invalidatedPaths.push(cachedPath);
+            }
+          }
         }
       }
     }
@@ -462,7 +475,7 @@ async function handleAssembleFinal(
     return { success: true, output: 'No NWDs to assemble into final model' };
   }
 
-  const revitVersion = resolveRevitVersion(allSteps);
+  const revitVersion = resolveRevitVersion(allSteps, null, build.revitVersion);
   if (!revitVersion) {
     return {
       success: false,
@@ -516,7 +529,11 @@ async function handleAssembleFinal(
   }
 }
 
-function resolveRevitVersion(allSteps: BuildStep[], sectionId?: string | null): string | null {
+function resolveRevitVersion(
+  allSteps: BuildStep[],
+  sectionId?: string | null,
+  fallback?: string | null
+): string | null {
   // First try convert steps, then any step with a model — covers builds with no conversions
   for (const s of allSteps) {
     if (s.stepType !== 'convert_rvt_nwd' || !s.model?.dataSource?.revitVersion) continue;
@@ -528,5 +545,5 @@ function resolveRevitVersion(allSteps: BuildStep[], sectionId?: string | null): 
     if (sectionId && s.model.sectionId !== sectionId) continue;
     return s.model.dataSource.revitVersion;
   }
-  return null;
+  return fallback ?? null;
 }
