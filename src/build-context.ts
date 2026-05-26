@@ -20,7 +20,7 @@ export function sanitizePath(name: string): string {
  * {outputPath}/
  * ├── Кэш/{sourceName}/model.rvt
  * ├── Сконвертированные/{sectionName}/
- * │   ├── model.nwd
+ * │   ├── _Модели/model.nwd
  * │   └── {sectionName}.nwd
  * ├── Сборки/{configName}/{configName}.nwd
  * └── Архив/

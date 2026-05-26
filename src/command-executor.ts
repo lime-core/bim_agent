@@ -1,9 +1,17 @@
 import { logger } from './logger.js';
 import { scanFolder, testFolderAccess } from './folder-scanner.js';
 import { scanRevitServer, testRevitServerConnection } from './revit-server-scanner.js';
+import { cleanupArtifacts, preflightArtifacts } from './artifact-preflight.js';
 import type { ApiClient } from './api-client.js';
 import type { AgentConfig } from './config.js';
-import type { AgentCommand, CommandResult, ScanFileEntry, VersionHistoryEntry } from './types.js';
+import type {
+  AgentCommand,
+  ArtifactCleanupPayload,
+  ArtifactPreflightPayload,
+  CommandResult,
+  ScanFileEntry,
+  VersionHistoryEntry,
+} from './types.js';
 
 const VERSIONS_CHUNK_SIZE = 10; // models per chunk
 
@@ -34,6 +42,12 @@ export async function executeCommand(
       case 'test_connection':
         result = await executeTestConnection(command, agentConfig);
         break;
+      case 'artifact_preflight':
+        result = await executeArtifactPreflight(command);
+        break;
+      case 'artifact_cleanup':
+        result = await executeArtifactCleanup(command);
+        break;
       default:
         result = {
           status: 'failed',
@@ -49,7 +63,12 @@ export async function executeCommand(
   // Separate version history from result to keep payload small
   let versionHistories: { filePath: string; versionHistory: VersionHistoryEntry[] }[] = [];
 
-  if (result.status === 'completed' && result.result?.files) {
+  if (
+    result.status === 'completed' &&
+    result.result &&
+    'files' in result.result &&
+    result.result.files
+  ) {
     const files = result.result.files as ScanFileEntry[];
     versionHistories = files
       .filter((f) => f.versionHistory && f.versionHistory.length > 0)
@@ -92,6 +111,10 @@ async function executeScanDataSource(
 ): Promise<CommandResult> {
   const { dataSource } = command;
 
+  if (!dataSource) {
+    return { status: 'failed', errorMessage: 'Command has no data source payload' };
+  }
+
   if (dataSource.type === 'folder') {
     if (!dataSource.folderPath) {
       return { status: 'failed', errorMessage: 'Data source has no folder path' };
@@ -124,6 +147,10 @@ async function executeTestConnection(
 ): Promise<CommandResult> {
   const { dataSource } = command;
 
+  if (!dataSource) {
+    return { status: 'failed', errorMessage: 'Command has no data source payload' };
+  }
+
   if (dataSource.type === 'folder') {
     if (!dataSource.folderPath) {
       return { status: 'failed', errorMessage: 'Путь к папке не указан' };
@@ -148,4 +175,26 @@ async function executeTestConnection(
   }
 
   return { status: 'failed', errorMessage: `Unknown data source type: ${dataSource.type}` };
+}
+
+async function executeArtifactPreflight(command: AgentCommand): Promise<CommandResult> {
+  const payload = command.payload as ArtifactPreflightPayload | undefined;
+
+  if (!payload?.outputPath || !Array.isArray(payload.expectedArtifacts)) {
+    return { status: 'failed', errorMessage: 'Invalid artifact preflight payload' };
+  }
+
+  const report = await preflightArtifacts(payload);
+  return { status: 'completed', result: report };
+}
+
+async function executeArtifactCleanup(command: AgentCommand): Promise<CommandResult> {
+  const payload = command.payload as ArtifactCleanupPayload | undefined;
+
+  if (!payload?.outputPath || !Array.isArray(payload.relativePaths)) {
+    return { status: 'failed', errorMessage: 'Invalid artifact cleanup payload' };
+  }
+
+  const result = await cleanupArtifacts(payload);
+  return { status: 'completed', result };
 }

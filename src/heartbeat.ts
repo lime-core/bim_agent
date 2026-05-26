@@ -1,6 +1,7 @@
 import { logger } from './logger.js';
 import type { ApiClient } from './api-client.js';
 import type { AgentStatus } from './types.js';
+import { AGENT_CAPABILITIES, AGENT_VERSION } from './agent-metadata.js';
 
 let intervalId: ReturnType<typeof setInterval> | null = null;
 let currentStatus: AgentStatus = 'online';
@@ -26,7 +27,11 @@ export function stopHeartbeat(): void {
 
 export async function sendHeartbeat(client: ApiClient): Promise<boolean> {
   try {
-    await client.sendHeartbeat({ status: currentStatus });
+    await client.sendHeartbeat({
+      status: currentStatus,
+      agentVersion: AGENT_VERSION,
+      capabilities: AGENT_CAPABILITIES,
+    });
     logger.debug(`Heartbeat sent: ${currentStatus}`);
     return true;
   } catch (err) {

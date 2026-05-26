@@ -86,7 +86,20 @@ export interface PendingBuildsResponse {
 
 export interface HeartbeatRequest {
   status: AgentStatus;
+  agentVersion?: string;
+  capabilities?: AgentCapability[];
 }
+
+export type AgentCapability =
+  | 'build.download_changed_models'
+  | 'build.convert_rvt_to_nwd'
+  | 'build.assemble_sections'
+  | 'build.assemble_final'
+  | 'data_source.scan'
+  | 'artifact.section_model_cache'
+  | 'artifact.preflight'
+  | 'artifact.cleanup'
+  | 'artifact.relative_paths';
 
 export interface ProgressReport {
   buildStatus?: BuildStatus;
@@ -118,7 +131,11 @@ export interface StepResult {
 
 // --- Agent Commands ---
 
-export type AgentCommandType = 'scan_data_source' | 'test_connection';
+export type AgentCommandType =
+  | 'scan_data_source'
+  | 'test_connection'
+  | 'artifact_preflight'
+  | 'artifact_cleanup';
 
 export type AgentCommandStatus = 'pending' | 'running' | 'completed' | 'failed' | 'expired';
 
@@ -142,7 +159,8 @@ export interface DataSourceInfo {
 export interface AgentCommand {
   id: string;
   commandType: AgentCommandType;
-  dataSource: DataSourceInfo;
+  dataSource?: DataSourceInfo;
+  payload?: ArtifactPreflightPayload | ArtifactCleanupPayload;
 }
 
 export interface PendingCommandsResponse {
@@ -171,8 +189,67 @@ export interface ScanFileEntry {
   versionHistory?: VersionHistoryEntry[];
 }
 
+export type AssemblyArtifactType = 'model_nwd' | 'section_nwd' | 'final_nwd';
+
+export interface ExpectedAssemblyArtifact {
+  type: AssemblyArtifactType;
+  relativePath: string;
+  label: string;
+  modelId?: string;
+  sectionId?: string;
+  buildConfigId?: string;
+  sourceVersion?: number;
+}
+
+export interface ArtifactPreflightPayload {
+  outputPath: string;
+  expectedArtifacts: ExpectedAssemblyArtifact[];
+}
+
+export interface ArtifactCleanupPayload {
+  outputPath: string;
+  relativePaths: string[];
+}
+
+export interface ArtifactFileEntry {
+  relativePath: string;
+  size?: number;
+  modifiedAt?: string;
+  type?: AssemblyArtifactType | 'unknown' | 'temporary';
+  label?: string;
+  reason?: string;
+}
+
+export interface ArtifactPreflightResult {
+  outputPath: string;
+  checkedAt: string;
+  summary: {
+    expected: number;
+    present: number;
+    missing: number;
+    safeDelete: number;
+    staleCandidates: number;
+    unknown: number;
+    truncated: boolean;
+  };
+  presentExpected: ArtifactFileEntry[];
+  missingExpected: ArtifactFileEntry[];
+  safeDelete: ArtifactFileEntry[];
+  staleCandidates: ArtifactFileEntry[];
+  unknown: ArtifactFileEntry[];
+}
+
+export interface ArtifactCleanupResult {
+  quarantinePath: string;
+  moved: Array<{ relativePath: string; quarantineRelativePath: string }>;
+  failed: Array<{ relativePath: string; error: string }>;
+}
+
 export interface CommandResult {
   status: 'completed' | 'failed';
-  result?: { files?: ScanFileEntry[]; message?: string };
+  result?:
+    | { files?: ScanFileEntry[]; message?: string }
+    | ArtifactPreflightResult
+    | ArtifactCleanupResult;
   errorMessage?: string;
 }

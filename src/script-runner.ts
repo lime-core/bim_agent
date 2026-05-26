@@ -242,17 +242,18 @@ async function handleConvert(
   const navisworksExe = getNavisworksPath(config, revitVersion);
   const nwdFileName = basename(step.model.fileName, '.rvt') + '.nwd';
 
-  // Output to: Сконвертированные/{Раздел}/model.nwd
+  // Output to: Сконвертированные/{Раздел}/_Модели/model.nwd
   const sectionName =
     step.model.sectionId && step.section
       ? `${step.section.code} — ${step.section.name}`
       : 'Нераспределённые';
   const sectionDir = context.getSectionConvertedDir(sectionName);
-  await mkdir(sectionDir, { recursive: true });
-  const nwdPath = join(sectionDir, nwdFileName);
+  const modelDir = join(sectionDir, '_Модели');
+  await mkdir(modelDir, { recursive: true });
+  const nwdPath = join(modelDir, nwdFileName);
 
   // Create temp input file (UTF-8 no BOM — Node.js default)
-  const inputTxtPath = join(sectionDir, `_input_${step.id}.txt`);
+  const inputTxtPath = join(modelDir, `_input_${step.id}.txt`);
   await writeFile(inputTxtPath, rvtPath, 'utf-8');
 
   logger.info(`Converting ${step.model.fileName} → ${nwdFileName} (Navisworks ${revitVersion})`);
@@ -294,6 +295,60 @@ async function handleConvert(
 
     context.setConvertedPath(step.model.id, nwdPath);
     return { success: true, output: `Converted ${nwdFileName}`, outputPath: nwdPath };
+  } catch (err) {
+    await unlink(inputTxtPath).catch(() => {});
+    throw err;
+  }
+}
+
+async function assembleSectionNwdFromInputs(params: {
+  sectionId: string;
+  sectionLabel: string;
+  sectionNwds: string[];
+  stepId: string;
+  context: BuildContext;
+  config: AgentConfig;
+  revitVersion: string;
+  signal?: AbortSignal;
+}): Promise<StepResult> {
+  const { sectionId, sectionLabel, sectionNwds, stepId, context, config, revitVersion, signal } =
+    params;
+  const navisworksExe = getNavisworksPath(config, revitVersion);
+  const sectionDir = context.getSectionConvertedDir(sectionLabel);
+  await mkdir(sectionDir, { recursive: true });
+  const sectionNwdPath = join(sectionDir, `${sanitizePath(sectionLabel)}.nwd`);
+
+  const inputTxtPath = join(sectionDir, `_input_section_${sanitizePath(stepId)}.txt`);
+  await writeFile(inputTxtPath, sectionNwds.join('\n'), 'utf-8');
+
+  logger.info(
+    `Assembling section "${sectionLabel}" (${sectionNwds.length} models, Navisworks ${revitVersion})`
+  );
+
+  try {
+    const result = await spawnProcess(
+      navisworksExe,
+      ['/i', inputTxtPath, '/of', sectionNwdPath, '/over', '/lang', config.navisworksLang],
+      { timeoutMs: config.processTimeoutMs, signal, encoding: config.processEncoding }
+    );
+
+    await unlink(inputTxtPath).catch(() => {});
+
+    if (result.exitCode !== 0) {
+      const errorDetail = enrichErrorMessage(`${result.stdout} ${result.stderr}`.trim());
+      return {
+        success: false,
+        output: result.stdout,
+        errorMessage: `Section assembly failed (code ${result.exitCode}): ${errorDetail}`,
+      };
+    }
+
+    context.setSectionPath(sectionId, sectionNwdPath);
+    return {
+      success: true,
+      output: `Assembled section "${sectionLabel}"`,
+      outputPath: sectionNwdPath,
+    };
   } catch (err) {
     await unlink(inputTxtPath).catch(() => {});
     throw err;
@@ -354,50 +409,19 @@ async function handleAssembleSection(
     };
   }
 
-  const navisworksExe = getNavisworksPath(config, revitVersion);
-
-  // Output to: Сконвертированные/{Раздел}/{Раздел}.nwd
   const sectionLabel = `${step.section.code} — ${step.section.name}`;
-  const sectionDir = context.getSectionConvertedDir(sectionLabel);
-  await mkdir(sectionDir, { recursive: true });
-  const sectionNwdPath = join(sectionDir, `${sanitizePath(sectionLabel)}.nwd`);
+  const result = await assembleSectionNwdFromInputs({
+    sectionId: step.sectionId,
+    sectionLabel,
+    sectionNwds,
+    stepId: step.id,
+    context,
+    config,
+    revitVersion,
+    signal,
+  });
 
-  const inputTxtPath = join(sectionDir, `_input_section_${step.id}.txt`);
-  await writeFile(inputTxtPath, sectionNwds.join('\n'), 'utf-8');
-
-  logger.info(
-    `Assembling section "${sectionLabel}" (${sectionNwds.length} models, Navisworks ${revitVersion})`
-  );
-
-  try {
-    const result = await spawnProcess(
-      navisworksExe,
-      ['/i', inputTxtPath, '/of', sectionNwdPath, '/over', '/lang', config.navisworksLang],
-      { timeoutMs: config.processTimeoutMs, signal, encoding: config.processEncoding }
-    );
-
-    await unlink(inputTxtPath).catch(() => {});
-
-    if (result.exitCode !== 0) {
-      const errorDetail = enrichErrorMessage(`${result.stdout} ${result.stderr}`.trim());
-      return {
-        success: false,
-        output: result.stdout,
-        errorMessage: `Section assembly failed (code ${result.exitCode}): ${errorDetail}`,
-      };
-    }
-
-    context.setSectionPath(step.sectionId, sectionNwdPath);
-    return {
-      success: true,
-      output: `Assembled section "${sectionLabel}"`,
-      outputPath: sectionNwdPath,
-      invalidatedPaths,
-    };
-  } catch (err) {
-    await unlink(inputTxtPath).catch(() => {});
-    throw err;
-  }
+  return { ...result, invalidatedPaths };
 }
 
 async function handleAssembleFinal(
@@ -429,18 +453,44 @@ async function handleAssembleFinal(
           finalNwdSet.add(expectedPath);
           logger.info(`Including unchanged section from filesystem: ${sectionLabel}`);
         } else {
-          logger.warn(`Section NWD ${validity} on filesystem (skipping): ${sectionLabel}`);
+          logger.warn(`Section NWD ${validity} on filesystem: ${sectionLabel}`);
+          const cachedSectionNwds: string[] = [];
           for (const cachedPath of section.cachedModelNwdPaths ?? []) {
             const cachedValidity = await verifyNwdPath(cachedPath);
             if (cachedValidity === 'valid') {
-              finalNwdSet.add(cachedPath);
-              logger.info(`Including cached model from section "${sectionLabel}": ${cachedPath}`);
+              cachedSectionNwds.push(cachedPath);
+              logger.info(`Using cached model to rebuild section "${sectionLabel}": ${cachedPath}`);
             } else {
               logger.warn(
                 `Cached section model NWD ${cachedValidity} (invalidating): ${cachedPath}`
               );
               invalidatedPaths.push(cachedPath);
             }
+          }
+
+          if (cachedSectionNwds.length > 0) {
+            const revitVersion = resolveRevitVersion(allSteps, section.id, build.revitVersion);
+            if (!revitVersion) {
+              return {
+                success: false,
+                output: '',
+                errorMessage: `Cannot determine Revit version for cached section rebuild: ${sectionLabel}`,
+              };
+            }
+
+            const rebuiltSection = await assembleSectionNwdFromInputs({
+              sectionId: section.id,
+              sectionLabel,
+              sectionNwds: cachedSectionNwds,
+              stepId: `${step.id}_${section.id}`,
+              context,
+              config,
+              revitVersion,
+              signal,
+            });
+
+            if (!rebuiltSection.success) return rebuiltSection;
+            if (rebuiltSection.outputPath) finalNwdSet.add(rebuiltSection.outputPath);
           }
         }
       }
