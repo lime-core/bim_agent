@@ -1,4 +1,5 @@
 import { logger } from './logger.js';
+import { httpRequest } from './http-client.js';
 import type {
   HeartbeatRequest,
   PendingBuildsResponse,
@@ -41,7 +42,7 @@ export class ApiClient {
           options.body = JSON.stringify(body);
         }
 
-        const res = await fetch(url, options);
+        const res = await httpRequest(url, options);
 
         if (res.status === 401) {
           logger.error('Authentication failed (401). Check API_KEY.');

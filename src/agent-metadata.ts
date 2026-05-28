@@ -1,6 +1,6 @@
 import type { AgentCapability } from './types.js';
 
-export const AGENT_VERSION = '0.2.0';
+export const AGENT_VERSION = '0.2.1';
 
 export const AGENT_CAPABILITIES: AgentCapability[] = [
   'build.download_changed_models',
@@ -11,4 +11,5 @@ export const AGENT_CAPABILITIES: AgentCapability[] = [
   'artifact.section_model_cache',
   'artifact.preflight',
   'artifact.cleanup',
+  'artifact.cleanup_selected',
 ];

@@ -99,6 +99,7 @@ export type AgentCapability =
   | 'artifact.section_model_cache'
   | 'artifact.preflight'
   | 'artifact.cleanup'
+  | 'artifact.cleanup_selected'
   | 'artifact.relative_paths';
 
 export interface ProgressReport {
@@ -209,6 +210,7 @@ export interface ArtifactPreflightPayload {
 export interface ArtifactCleanupPayload {
   outputPath: string;
   relativePaths: string[];
+  expectedArtifacts?: ExpectedAssemblyArtifact[];
 }
 
 export interface ArtifactFileEntry {

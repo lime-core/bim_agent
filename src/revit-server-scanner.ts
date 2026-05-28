@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { logger } from './logger.js';
+import { httpRequest } from './http-client.js';
 import type { ScanFileEntry, DataSourceInfo, VersionHistoryEntry } from './types.js';
 import type { AgentConfig } from './config.js';
 
@@ -145,7 +146,7 @@ async function fetchContents(
 
   logger.debug(`Revit Server API: GET ${url}`);
 
-  const response = await fetch(url, {
+  const response = await httpRequest(url, {
     method: 'GET',
     headers: {
       ...headers,
@@ -197,7 +198,7 @@ async function fetchHistory(
 
   logger.debug(`Revit Server API: GET ${url}`);
 
-  const response = await fetch(url, {
+  const response = await httpRequest(url, {
     method: 'GET',
     headers: {
       ...headers,

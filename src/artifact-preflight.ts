@@ -182,6 +182,16 @@ function isSafeCleanupRelativePath(relativePath: string): boolean {
   return isTemporaryInput(relativePath);
 }
 
+function isSelectableStaleCleanupRelativePath(relativePath: string): boolean {
+  return isGeneratedNwdCandidate(relativePath) || isManagedCacheCandidate(relativePath);
+}
+
+function isCleanupAllowedRelativePath(relativePath: string, expectedByKey: Set<string>): boolean {
+  if (isSafeCleanupRelativePath(relativePath)) return true;
+  if (expectedByKey.has(keyPath(relativePath))) return false;
+  return isSelectableStaleCleanupRelativePath(relativePath);
+}
+
 async function nextAvailablePath(path: string): Promise<string> {
   if (!(await fileExists(path))) return path;
 
@@ -319,6 +329,9 @@ export async function cleanupArtifacts(
   payload: ArtifactCleanupPayload
 ): Promise<ArtifactCleanupResult> {
   const outputPath = resolve(payload.outputPath);
+  const expectedByKey = new Set(
+    (payload.expectedArtifacts || []).map((artifact) => keyPath(artifact.relativePath))
+  );
   const quarantineRelativeRoot = `_Очистка/Карантин/${cleanupTimestamp()}`;
   const quarantineRoot = resolveInsideRoot(outputPath, quarantineRelativeRoot);
   const moved: ArtifactCleanupResult['moved'] = [];
@@ -332,10 +345,18 @@ export async function cleanupArtifacts(
     try {
       relativePath = normalizeRelativePath(inputPath);
 
-      if (!isSafeCleanupRelativePath(relativePath)) {
+      if (expectedByKey.has(keyPath(relativePath))) {
         failed.push({
           relativePath,
-          error: 'Файл не относится к безопасной автоматической очистке',
+          error: 'Файл является актуальным ожидаемым артефактом',
+        });
+        continue;
+      }
+
+      if (!isCleanupAllowedRelativePath(relativePath, expectedByKey)) {
+        failed.push({
+          relativePath,
+          error: 'Файл не относится к выбранной безопасной очистке',
         });
         continue;
       }
